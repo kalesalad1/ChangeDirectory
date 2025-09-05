@@ -1,0 +1,32 @@
+{
+  "name": "change-directory",
+  "displayName": "change-directory",
+  "description": "Workspace Explorer with folder search",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./change-directory.js",
+  "contributes": {
+    "views": {
+      "explorer": [
+        {
+          "id": "workspaceExplorer",
+          "name": "Workspace Explorer"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "change-directory.expandFolder",
+        "title": "CD"
+      }
+    ]
+  },
+  "devDependencies": {
+    "vscode": "^1.1.37"
+  }
+}
