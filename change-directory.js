@@ -1,19 +1,18 @@
 const vscode = require('vscode');
-const fs = require('fs');
 const path = require('path');
 
 class TreeNode {
-    constructor(label, fullPath, collapsibleState) {
+    constructor(label, uri, collapsibleState) {
         this.label = label;
-        this.fullPath = fullPath;
+        this.uri = uri; // Use URI instead of fullPath
         this.collapsibleState = collapsibleState;
-        this.children = null; 
+        this.children = null;
     }
 }
 
 class WorkspaceTreeProvider {
-    constructor(rootPath) {
-        this.rootPath = rootPath;
+    constructor(rootUri) {
+        this.rootUri = rootUri;
         this._onDidChangeTreeData = new vscode.EventEmitter();
         this.onDidChangeTreeData = this._onDidChangeTreeData.event;
     }
@@ -22,41 +21,44 @@ class WorkspaceTreeProvider {
         this._onDidChangeTreeData.fire();
     }
 
-
     getTreeItem(element) {
         return {
             label: element.label,
             collapsibleState: element.collapsibleState,
             command: element.collapsibleState === vscode.TreeItemCollapsibleState.None
-                ? { command: 'vscode.open', title: 'Open File', arguments: [vscode.Uri.file(element.fullPath)] }
+                ? { command: 'vscode.open', title: 'Open File', arguments: [element.uri] }
                 : undefined
         };
     }
 
-
-    getChildren(element) {
-        const dir = element ? element.fullPath : this.rootPath;
-        if (!fs.existsSync(dir)) return [];
-        return fs.readdirSync(dir).map(name => {
-            const fullPath = path.join(dir, name);
-            const stat = fs.statSync(fullPath);
-            return new TreeNode(
-                name,
-                fullPath,
-                stat.isDirectory() ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None
-            );
-        });
+    async getChildren(element) {
+        const uri = element ? element.uri : this.rootUri;
+        try {
+            const children = await vscode.workspace.fs.readDirectory(uri);
+            return children.map(([name, fileType]) => {
+                const childUri = vscode.Uri.joinPath(uri, name);
+                const collapsibleState = fileType === vscode.FileType.Directory
+                    ? vscode.TreeItemCollapsibleState.Collapsed
+                    : vscode.TreeItemCollapsibleState.None;
+                return new TreeNode(name, childUri, collapsibleState);
+            });
+        } catch (err) {
+            console.error(err);
+            return [];
+        }
     }
 
-    findNodesByName(name, node = { fullPath: this.rootPath }) {
+    async findNodesByName(name, node = null) {
+        const uri = node ? node.uri : this.rootUri;
         let results = [];
-        const children = this.getChildren(node);
+        const children = await this.getChildren(node);
         for (const child of children) {
-            if (child.label.toLowerCase() === name.toLowerCase() && child.collapsibleState !== vscode.TreeItemCollapsibleState.None) {
+            if (child.label.toLowerCase() === name.toLowerCase() &&
+                child.collapsibleState !== vscode.TreeItemCollapsibleState.None) {
                 results.push(child);
             }
             if (child.collapsibleState !== vscode.TreeItemCollapsibleState.None) {
-                results = results.concat(this.findNodesByName(name, child));
+                results = results.concat(await this.findNodesByName(name, child));
             }
         }
         return results;
@@ -69,7 +71,7 @@ function activate(context) {
         return;
     }
 
-    const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+    const workspaceRoot = vscode.workspace.workspaceFolders[0].uri;
     const treeProvider = new WorkspaceTreeProvider(workspaceRoot);
 
     vscode.window.registerTreeDataProvider('workspaceExplorer', treeProvider);
@@ -78,7 +80,7 @@ function activate(context) {
         const folderName = await vscode.window.showInputBox({ prompt: 'Enter folder name to expand' });
         if (!folderName) return;
 
-        const matches = treeProvider.findNodesByName(folderName);
+        const matches = await treeProvider.findNodesByName(folderName);
 
         if (matches.length === 0) {
             vscode.window.showErrorMessage(`Folder "${folderName}" not found`);
@@ -91,16 +93,14 @@ function activate(context) {
             nodeToReveal = matches[0];
         } else {
             const pick = await vscode.window.showQuickPick(
-                matches.map(m => ({ label: m.label, description: m.fullPath, node: m })),
+                matches.map(m => ({ label: m.label, description: m.uri.fsPath, node: m })),
                 { placeHolder: 'Multiple folders found, pick one' }
             );
             if (!pick) return;
             nodeToReveal = pick.node;
         }
 
-        vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(nodeToReveal.fullPath));
-
-
+        vscode.commands.executeCommand('revealInExplorer', nodeToReveal.uri);
         treeProvider.refresh();
     });
 
